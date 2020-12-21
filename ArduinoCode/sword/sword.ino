@@ -11,6 +11,14 @@
 #define PIN_BAT A1        // Battery level
 
 #include <Wire.h>
+#include <FastLED.h>
+
+//#define MPU6050
+
+// WS2812B Constants and variables
+#define NUM_LEDS 70
+CRGB leds[NUM_LEDS];
+CRGB targetLeds[NUM_LEDS];
 
 // Constant definitions
 const int MPU = 0x68;
@@ -21,6 +29,7 @@ boolean g_bTs;
 boolean g_bPerformedTs;
 boolean g_bLEDs;
 boolean g_bLEDr;
+boolean g_bLEDg;
 
 // Global variables
 unsigned long g_time;
@@ -30,6 +39,7 @@ byte g_nLEDr;
 int g_nLoopCount;
 
 // MPU6050 global variables
+#ifdef MPU6050
 float AccSens, GyroSens;
 float AccX, AccY, AccZ;
 float GyroX, GyroY, GyroZ;
@@ -37,6 +47,7 @@ float AccAngleX, AccAngleY, GyroAngleX, GyroAngleY, GyroAngleZ;
 float Roll, Pitch, Yaw;
 float AccErrorX, AccErrorY, GyroErrorX, GyroErrorY, GyroErrorZ;
 unsigned long AccElapsedTime, AccCurrentTime, AccPrevTime;
+#endif
 
 // Function prototypes
 void touchSensor(void);
@@ -67,13 +78,17 @@ void setup() {
   digitalWrite(PIN_LED_R, LOW);
 
   attachInterrupt(digitalPinToInterrupt(PIN_TS), touchSensor, CHANGE);
+  FastLED.addLeds<WS2812, PIN_LEDS, GRB>(leds, NUM_LEDS);
+#ifdef MPU6050
   mpu6050setup();
+#endif
 
   g_bCharging = false;
   g_bTs = false;
   g_bPerformedTs = false;
   g_bLEDs = false;
   g_bLEDr = false;
+  g_bLEDg = true;
   g_time =  0;
   g_touchTime = 0;
   g_nTouch = 0;
@@ -82,6 +97,7 @@ void setup() {
 
 
   Serial.begin(9600);
+  Serial.println("Starting Sword");
 
 }
 
@@ -94,9 +110,20 @@ void loop() {
     checkBattery();
   }
 
+
+#ifdef MPU6050
   // Get Accel & Gyro data each 20 ms delay
   if (g_nLoopCount % 20 == 0) {
     mpu6050read();
+  }
+#endif
+
+
+
+  // Blink LED_G each 200 ms delay
+  if (g_nLoopCount % 200 == 0) {
+    g_bLEDg = !g_bLEDg;
+    digitalWrite(PIN_LED_G, g_bLEDg);
   }
 
   // Use to divide code into fast or slow operation.
@@ -213,28 +240,30 @@ void checkBattery() {
   }
 }
 
+/****************************** LEDs functions *******************************/
+
 void ledWave() {
   Serial.println("1 press Touch Sensor");
-  //TODO
+  ledFadeColor(CRGB::Red, 8, 0, 1);
 
 
 }
 
 void ledDifuseChange() {
   Serial.println("2 press Touch Sensor");
-  //TODO
+  ledFadeColor(CRGB::White, 8, 0, 1);
 
 }
 
 void ledFadeON() {
   Serial.println("Switch ON Sword");
-  //TODO
+  ledFadeColor(CRGB::White, 2, 10, 1);
 
 }
 
 void ledFadeOFF() {
   Serial.println("Switch OFF Sword");
-  //TODO
+  ledFadeColor(CRGB::Black, 12, 10, -1);
 
 }
 
@@ -244,9 +273,138 @@ void ledBattStatus() {
   //TODO
 
 }
+void ledNormal() {
+  ledFadeColor(CRGB::White, 8, 0, 0);
+}
 
+void ledImpact() {
+  // Yellow Fast blink motion and fade at the end.
 
+}
 
+void ledAgressive() {
+  ledFadeColor(CRGB::Red, 8, 0, 1);
+}
+
+void ledHighGuard() {
+  /*  Lower base light to see the animation
+      Wave slow -> fast to blue from the bottom to the top
+      each cycle add new pixel fixed from base light to blue light
+      Each wave that pass through changed pixel invert colour to previous
+  */
+
+}
+
+void ledLowGuard() {
+  // Difuse to Green
+
+}
+
+void ledDefenseGuard() {
+  // Difuse to Blue
+}
+
+void ledFadeColor(CRGB color, int fadeVel, int delayTime, int wave) {
+  int changed = 0;
+
+  /* wave = 0 -> No wave
+   * wave > 0 -> Bottom to Top wave
+   * wave < 0 -> Top to bottom wave
+   */
+  int w = NUM_LEDS;
+  if (wave > 0) {
+    w = 1;
+  }
+
+  for(int i = 0; i < NUM_LEDS; i++) {
+      targetLeds[i] = color;
+  }
+
+  while (changed != NUM_LEDS){
+    changed = 0;
+    if (wave < 0) {
+      for(int i = NUM_LEDS-1; i >= w; i--){
+        fadeTowardColor(leds[i], targetLeds[i], fadeVel);
+        if (leds[i].red == targetLeds[i].red
+            && leds[i].green == targetLeds[i].green
+            && leds[i].blue == targetLeds[i].blue){
+          changed++;
+        }
+      }
+      if (w > 0) w--;
+
+    } else {
+      for(int i = 0; i < w; i++){
+        fadeTowardColor(leds[i], targetLeds[i], fadeVel);
+        if (leds[i].red == targetLeds[i].red
+            && leds[i].green == targetLeds[i].green
+            && leds[i].blue == targetLeds[i].blue){
+          changed++;
+        }
+      }
+      if (w < NUM_LEDS) w++;
+    }
+
+    FastLED.show();
+    delay(delayTime);
+  }
+}
+
+// Blend one CRGB color toward another CRGB color by a given amount.
+// Blending is linear, and done in the RGB color space.
+// This function modifies 'cur' in place.
+CRGB fadeTowardColor( CRGB& cur, const CRGB& target, uint8_t amount)
+{
+  nblendU8TowardU8( cur.red,   target.red,   amount);
+  nblendU8TowardU8( cur.green, target.green, amount);
+  nblendU8TowardU8( cur.blue,  target.blue,  amount);
+  return cur;
+}
+
+// Helper function that blends one uint8_t toward another by a given amount
+void nblendU8TowardU8( uint8_t& cur, const uint8_t target, uint8_t amount)
+{
+  if( cur == target) return;
+
+  if( cur < target ) {
+    uint8_t delta = target - cur;
+    delta = scale8_video( delta, amount);
+    cur += delta;
+  } else {
+    uint8_t delta = cur - target;
+    delta = scale8_video( delta, amount);
+    cur -= delta;
+  }
+}
+
+/****************************** Buzzer functions *****************************/
+
+void bzFadeON() {
+  //TODO
+}
+
+void bzFadeOFF() {
+  //TODO
+}
+
+void bzAgressive() {
+  //TODO
+}
+
+void bzImpact() {
+  //TODO
+}
+
+void bzHitPoint() {
+  //TODO
+}
+
+void bzChargePosutre() {
+  //TODO
+}
+
+/**************************** MPU6050 functions ******************************/
+#ifdef MPU6050
 void mpu6050setup() {
   Wire.beginTransmission(MPU);       // Start communication with MPU6050 // MPU=0x68
   Wire.write(0x6B);                  // Talk to the register 6B
@@ -421,3 +579,4 @@ void mpu6050read() {
   */
 
 }
+#endif
