@@ -10,6 +10,8 @@ Features:
 - Touch sensitive button & beeper.
 
 
-<img src="pcbSword3D.PNG">
-<img src="pcbSword.PNG">
-
+<img src="pcbSword3D_v2.PNG">
+<img src="pcbSword_v2.PNG">
+<img src="sch_bms.PNG">
+<img src="sch_system.PNG">
+<img src="sch_modules.PNG">
