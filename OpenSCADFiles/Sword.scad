@@ -3,7 +3,7 @@ $fn = 100;
 // Variable declarations
 dBase = 25;
 hBase = 5;
-dInnerBase = 19.4; // 25 - 2.8x2 thickness
+dInnerBase = 21; // 25 - 2.8x2 thickness
 
 dSW = 15.5;
 dCapSW = 17;
@@ -17,6 +17,7 @@ dPinBat = 10;
 hPinBat = 10;
 hGapBat = 2;
 
+yPcbGap = 2;
 hPcbGap = 8;
 pins2pcbGap = 8;
 pinsHole = dInnerBase - pins2pcbGap*2;
@@ -64,7 +65,9 @@ module PCB(){
     translate([M3HoleCenter,dInnerBase/2,hTotal-hole2pcbGap])
         rotate([90,90,0])
             cylinder(h=dInnerBase,d=dM3Hole);
-    translate([0,0,hTotal-hPcbGap/2])
+    translate([0,yPcbGap/2,hTotal-hPcbGap/2])
+        cube([dInnerBase,yPcbGap,hPcbGap],true);
+    translate([0,yPcbGap,hTotal-hPcbGap/2])
         cube([pinsHole,2,hPcbGap],true);
     
 }
