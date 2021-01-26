@@ -9,7 +9,7 @@ Features:
 - 3 axis Accel/gyro MPU-6050
 - Touch sensitive button & beeper.
 
-
+<img src="sword.png">
 <img src="pcbSword3D_v2.PNG">
 <img src="pcbSword_v2.PNG">
 <img src="sch_bms.PNG">
