@@ -10,8 +10,8 @@ Features:
 - Touch sensitive button & beeper.
 
 <img src="DCIM/sword.png">
-<img src="DCIM/pcbSword3D_v2.PNG">
-<img src="DCIM/pcbSword_v2.PNG">
-<img src="DCIM/sch_bms.PNG">
-<img src="DCIM/sch_system.PNG">
-<img src="DCIM/sch_modules.PNG">
+<img src="DCIM/pcbSword3D_v2.png">
+<img src="DCIM/pcbSword_v2.png">
+<img src="DCIM/sch_bms.png">
+<img src="DCIM/sch_system.png">
+<img src="DCIM/sch_modules.png">
