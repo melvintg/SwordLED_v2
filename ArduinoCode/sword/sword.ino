@@ -23,32 +23,37 @@
 
 const int VBAT = 421;
 
+// Frequency constant variables
+#define F2KHZ 2000
+#define F1KHZ 1000
+#define F500HZ 500
+
 // Delay constant variables
 #ifdef MPU6050
 #define DELAY_LED_R 150
 #define DELAY_LED_G 100
 #define DELAY_IMPACT 8
 #define DELAY_BAT_CHECK 100
-#define DELAY_BZ_ON 1
-#define DELAY_BZ_OFF 3
+#define DELAY_BZ 4
 #define DELAY_LED_FADE_ON 7
 #define DELAY_LED_FADE_OFF 8
 #define DELAY_LED_WAVE 0
-#define DELAY_HG_WAVE 6
-#define DELAY_HG_BLINK 40
+#define DELAY_HG_WAVE 4
+#define DELAY_HG_BLINK 80
+#define DELAY_FAST_BLINK 10
 
 #else
 #define DELAY_LED_R 250
 #define DELAY_LED_G 200
 #define DELAY_IMPACT 15
 #define DELAY_BAT_CHECK 200
-#define DELAY_BZ_ON 4
-#define DELAY_BZ_OFF 4
+#define DELAY_BZ 4
 #define DELAY_LED_FADE_ON 10
 #define DELAY_LED_FADE_OFF 10
 #define DELAY_LED_WAVE 4
-#define DELAY_HG_WAVE 6
-#define DELAY_HG_BLINK 40
+#define DELAY_HG_WAVE 4
+#define DELAY_HG_BLINK 80
+#define DELAY_FAST_BLINK 10
 #endif
 
 // Bluetooth global variables
@@ -91,14 +96,16 @@ Gyro_t gGyro;
 
 // LED animations using Accel.
 typedef struct AccelAnimations {
-  byte nImact;    // Impact detected
-  boolean bAgr;   // Agressive Action
-  boolean bLG;    // Low guard
-  boolean bDG;    // Defensive guard
-  boolean bHG;    // High guard
-  byte tHG;
-  byte delayTime;
-  int nHG;
+  byte nImact;        // Impact Action
+  boolean bAgr;       // Agressive Action
+  boolean impDetect;  // Impact detected
+  boolean agrDetect;  // Agressive detected
+  boolean bLG;        // Low guard
+  boolean bDG;        // Defensive guard
+  boolean bHG;        // High guard
+  byte tHG;           // High guard wave time
+  byte delayTime;     // High guard refresh time
+  int nHG;            // High guard counter
 } AccFx_t;
 AccFx_t gAccFx;
 
@@ -137,8 +144,8 @@ typedef struct Buzzer {
   boolean fadeON;
   boolean fadeOFF;
   boolean wave;
+  boolean invWave;
   int n;
-  byte delayTime;
 }Bz_t;
 Bz_t gBz;
 
@@ -149,6 +156,7 @@ CRGB Leds[NUM_LEDS];
 CRGB TargetLeds[NUM_LEDS];
 const CRGB COLOR[NUM_COLOR] = {CRGB::White, CRGB::Orange, CRGB::Blue, CRGB::HotPink,  CRGB::Green};
 byte ColorPos;
+CRGB g_CurrentColor;
 
 // Constant definitions
 const int MPU = 0x68;
@@ -159,6 +167,7 @@ boolean g_bTs;
 boolean g_bLEDs;
 boolean g_bLEDg;
 boolean g_bSword;
+boolean g_bFastLedBlink;
 
 // Global variables
 unsigned long g_time;
@@ -180,8 +189,6 @@ void ledFadeAll(int fadeVal);
 // LED impact function prototypes
 void startSwordImpact(void);
 void xSwordImpact(void);
-void ledImpact(void);
-void bzImpact(void);
 
 // LED on/off function prototypes
 void ledON(CRGB color, int nLeds);
@@ -194,10 +201,13 @@ int askBat(void);
 void checkBattery(void);
 
 // Buzzer function prototypes
-void startBzFade(byte delayTime, boolean isFadeON, boolean isWave);
+void startBzFade(boolean isFadeON);
+void startBzWave(boolean isInv);
 void xBzFadeON(void);
 void xBzFadeOFF(void);
 void xBzWave(void);
+void xBzInvWave(void);
+void bzBlink(int f);
 
 // Touch sensor function prototypes
 void touchSensor(void);
@@ -209,6 +219,7 @@ void ledDifuseChange(void);
 void ledFadeON(void);
 void ledFadeOFF(void);
 void ledNormal(void);
+void fastLedBlink(CRGB color);
 void ledAgressive(void);
 
 // LED animations using Accel. function prototypes
@@ -216,6 +227,7 @@ void startLedHighGuard(void);
 void xLedHighGuard(void);
 void ledLowGuard(void);
 void ledDefenseGuard(void);
+
 
 // Accel. function prototypes
 #ifdef MPU6050
@@ -236,6 +248,8 @@ void setup() {
   gAccFx.bLG = false;
   gAccFx.bDG = false;
   gAccFx.bAgr = false;
+  gAccFx.impDetect = false;
+  gAccFx.agrDetect = false;
 
   // LED fade Animation variables
   gLedFade.active = false;
@@ -261,6 +275,7 @@ void setup() {
   gBz.fadeON = false;
   gBz.fadeOFF = false;
   gBz.wave = false;
+  gBz.invWave = false;
 
   pinMode(PIN_TS, INPUT);
   pinMode(PIN_LED_W, OUTPUT);
@@ -280,6 +295,7 @@ void setup() {
   FastLED.addLeds<WS2812, PIN_LEDS, GRB>(Leds, NUM_LEDS);
   LEDS.setBrightness(180);
   ColorPos = 0;
+  g_CurrentColor = COLOR[ColorPos];
   ledOFF();
 
 #ifdef MPU6050
@@ -293,6 +309,7 @@ void setup() {
   g_bLEDs = false;
   g_bLEDg = true;
   g_bSword = false;
+  g_bFastLedBlink = false;
   g_nLoopCount = 0;
 
   g_bTs = false;
@@ -329,6 +346,12 @@ void loop() {
         break;
       case '4':
         ledAgressive();
+        break;
+
+        case 'f':
+        // Fast Led Blink
+        g_bFastLedBlink = !g_bFastLedBlink;
+        if (!g_bFastLedBlink) ledNormal();
         break;
 
       case 'n':
@@ -395,52 +418,53 @@ void loop() {
 #endif
 
 /******************************* Sword animation *****************************/
-  if (gAccFx.nImact > 0) {
-    if (g_nLoopCount % DELAY_IMPACT == 0) {
-      xSwordImpact();
-    }
-  }
 
+  // LEDs animations
   if (gBatCheck.active) {
     if (g_nLoopCount % DELAY_BAT_CHECK == 0) {
       xBatCheck();
     }
-  }
-
-  if (gLedFade.active) {
+  } else if (gAccFx.nImact > 0) {
+    if (g_nLoopCount % DELAY_IMPACT == 0) {
+      xSwordImpact();
+    }
+  } else if (gLedFade.active) {
     if (g_nLoopCount % gLedFade.delayTime == 0) {
       xLedFade();
     }
-  }
-
-  if (gLedWave.active) {
+  } else if (gLedWave.active) {
     if (g_nLoopCount % gLedWave.delayTime == 0) {
       xLedWave();
     }
-  }
-
-  if (gBz.fadeON) {
-    if (g_nLoopCount % gBz.delayTime == 0) {
-      xBzFadeON();
+  } else if (g_bFastLedBlink && !gAccFx.bHG) {
+    if (g_nLoopCount % DELAY_FAST_BLINK == 0) {
+      fastLedBlink(g_CurrentColor);
     }
   }
 
-  if (gBz.fadeOFF) {
-    if (g_nLoopCount % gBz.delayTime == 0) {
-      xBzFadeOFF();
-    }
-  }
-
-  if (gBz.wave) {
-    if (g_nLoopCount % gBz.delayTime == 0) {
-      xBzWave();
-    }
-  }
-
-  // Check if it is high guard animation
+  // Accel uses multiple LEDs animatons
   if (gAccFx.bHG) {
     if (g_nLoopCount % gAccFx.delayTime == 0) {
       xLedHighGuard();
+    }
+  }
+
+  // Buzzer animations
+  if (gBz.fadeON) {
+    if (g_nLoopCount % DELAY_BZ == 0) {
+      xBzFadeON();
+    }
+  } else if (gBz.fadeOFF) {
+    if (g_nLoopCount % DELAY_BZ == 0) {
+      xBzFadeOFF();
+    }
+  } else if (gBz.wave) {
+    if (g_nLoopCount % DELAY_BZ == 0) {
+      xBzWave();
+    }
+  } else if (gBz.invWave) {
+    if (g_nLoopCount % DELAY_BZ == 0) {
+      xBzInvWave();
     }
   }
 
@@ -534,9 +558,13 @@ void checkTouchTS() {
         if (g_nTouch == 1) {
           Serial.println("1 press Touch Sensor");
           ledPulse();
-        } else if (g_nTouch > 1) {
+        } else if (g_nTouch == 2) {
           Serial.println("2 press Touch Sensor");
           ledDifuseChange();
+        } else {
+          Serial.println("3 press Touch Sensor");
+          g_bFastLedBlink = !g_bFastLedBlink;
+          if (!g_bFastLedBlink) ledNormal();
         }
         g_nTouch = 0;
       }
@@ -603,7 +631,7 @@ void ledPulse() {
   if (g_bSword) {
     Serial.println("Pulse led wave animation...");
     startLedWave(235, DELAY_LED_WAVE);
-    startBzFade(DELAY_BZ_OFF, false, true);
+    startBzWave(true);
   }
 }
 
@@ -612,8 +640,11 @@ void ledDifuseChange() {
   ColorPos++;
   if (ColorPos == NUM_COLOR) ColorPos = 0;
 
-  if (g_bSword)
+  if (g_bSword) {
     startLedFade(COLOR[ColorPos], 8, 0, 0);
+    startBzWave(false);
+  }
+
 }
 
 void ledFadeON() {
@@ -622,7 +653,7 @@ void ledFadeON() {
   g_bSword = true;
   ColorPos = 0;
   startLedFade(COLOR[ColorPos], 2, DELAY_LED_FADE_ON, 1);
-  startBzFade(DELAY_BZ_ON, true, false);
+  startBzFade(true);
 }
 
 void ledFadeOFF() {
@@ -630,7 +661,7 @@ void ledFadeOFF() {
   g_bLEDs = false;
   g_bSword = false;
   startLedFade(CRGB::Black, 12, DELAY_LED_FADE_OFF, -1);
-  startBzFade(DELAY_BZ_OFF, false, false);
+  startBzFade(false);
 }
 
 void ledNormal() {
@@ -639,11 +670,23 @@ void ledNormal() {
     g_bLEDs = true;
     startLedFade(COLOR[ColorPos], 8, 0, 0);
   }
+  noTone(PIN_BZ);
+}
+
+// Fast lEDs blink motion
+void fastLedBlink(CRGB color) {
+  g_bLEDs = !g_bLEDs;
+  if (g_bLEDs) {
+    ledON(color, NUM_LEDS);
+  } else {
+    ledOFF();
+  }
 }
 
 void ledAgressive() {
   Serial.println("Sword movement detected...");
   startLedFade(CRGB::Red, 8, 0, 1);
+  startBzWave(true);
 }
 
 
@@ -656,27 +699,25 @@ void startLedHighGuard() {
 }
 
 void xLedHighGuard() {
+  bzBlink(F2KHZ);
   // Animation in process
   if (gLedFade.active || gLedWave.active) return;
 
   // To active, use gAccFx.bHG = true
   if (gAccFx.nHG == 0) {
       startLedFade(CRGB::Blue,50,0,0);
-  } else if (gAccFx.nHG < 30) {
+  } else if (gAccFx.tHG > 0) {
       startLedWave(235, gAccFx.tHG);
       // Speed the animation
-      if (gAccFx.nHG % 2 == 0 && gAccFx.tHG > 0) {
+      if (gAccFx.nHG % 2 == 0) {
         gAccFx.tHG--;
       }
   } else {
-    if (g_bLEDs) {
-      ledON(CRGB::Blue, NUM_LEDS);
-    } else {
-      ledOFF();
-    }
-    g_bLEDs = !g_bLEDs;
-    if (gAccFx.nHG % 5 == 0 && gAccFx.delayTime > 10) {
+    fastLedBlink(CRGB::Blue);
+    if (gAccFx.delayTime > 30) {
         gAccFx.delayTime--;
+    } else if (gAccFx.nHG % 4 == 0 && gAccFx.delayTime > 10) {
+      gAccFx.delayTime--;
     }
   }
   gAccFx.nHG++;
@@ -688,12 +729,14 @@ void xLedHighGuard() {
 void ledLowGuard() {
   // Difuse to Green
   startLedFade(CRGB::Green, 8, 0, 1);
+  startBzWave(false);
 
 }
 
 void ledDefenseGuard() {
   // Difuse to Blue
   startLedFade(CRGB::Blue, 8, 0, 1);
+  startBzWave(false);
 }
 
 
@@ -709,6 +752,7 @@ void ledDefenseGuard() {
 
 /**************************** ON/OFF LEDs function ***************************/
 void ledON(CRGB color, int nLeds) {
+  g_CurrentColor = color;
   for(int i = 0; i < nLeds; i++) {
       Leds[i] = color;
   }
@@ -841,34 +885,13 @@ void xSwordImpact() {
   if (gAccFx.nImact == 1) {
     // Last impact. Get to Normal
     ledNormal();
-    noTone(PIN_BZ);
     gAccFx.nImact = 0;
   } else {
-    ledImpact();
-    bzImpact();
+    fastLedBlink(CRGB::Yellow);
+    bzBlink(F2KHZ);
     gAccFx.nImact--;
   }
 }
-
-// Yellow Fast blink motion
-void ledImpact() {
-  g_bLEDs = !g_bLEDs;
-  if (g_bLEDs) {
-    ledON(CRGB::Yellow, NUM_LEDS);
-  } else {
-    ledOFF();
-  }
-}
-
-// Beeping Buzzer motion
-void bzImpact() {
-  if (g_bLEDs) {
-    tone(PIN_BZ, 2000);
-  } else {
-    noTone(PIN_BZ);
-  }
-}
-
 
 /***************************** Wave LED animation ****************************/
 /* Start LED fade animation by setting global variables and setting a mutex */
@@ -891,7 +914,7 @@ void xLedWave() {
     gLedWave.progress++;
   } else {
     gLedWave.active = false;
-    ledNormal();
+    startLedFade(g_CurrentColor, 8, 0, 0);
   }
 }
 
@@ -907,6 +930,7 @@ void ledFadeAll(int fadeVal) {
 /* Start LED fade animation by setting global variables and setting a mutex */
 void startLedFade(CRGB color, byte fadeVal, byte delayTime, int wave) {
   if (gBatCheck.active) return;
+  g_CurrentColor = color;
   gLedFade.active = true;
   gLedFade.progress = 0;
   gLedFade.delayTime = delayTime;
@@ -995,24 +1019,19 @@ void nblendU8TowardU8( uint8_t& cur, const uint8_t target, uint8_t amount) {
 /****************************** Buzzer functions *****************************
 
 ##############################################################################*/
-/* Start fade Buzzer. Used for ON/OFF Sword and pulse wave animations. */
-void startBzFade(byte delayTime, boolean isFadeON, boolean isWave) {
-  if (gBz.fadeON || gBz.fadeOFF || gBz.wave) return;
+/* Start fade Buzzer. Used for ON/OFF Sword, */
+void startBzFade(boolean isFadeON) {
+  gBz.fadeON = false;
+  gBz.fadeOFF = false;
+  gBz.wave = false;
+  gBz.invWave = false;
 
-  if (isWave) {
-    gBz.wave = true;
-    gBz.n = 5000;
-    gBz.delayTime = delayTime;
+  if (isFadeON) {
+    gBz.fadeON = true;
+    gBz.n = 0;
   } else {
-    if (isFadeON) {
-      gBz.fadeON = true;
-      gBz.n = 0;
-      gBz.delayTime = delayTime;
-    } else {
-      gBz.fadeOFF = true;
-      gBz.n = 5000;
-      gBz.delayTime = delayTime;
-    }
+    gBz.fadeOFF = true;
+    gBz.n = 5000;
   }
   gBz.active = true;
 }
@@ -1059,8 +1078,47 @@ void xBzFadeOFF() {
   }
 }
 
-/* Buzzer fade pulse wave task executed in main loop every gBz.delayTime */
+/* Start fade Buzzer. Used for ON/OFF Sword and pulse wave animations. */
+void startBzWave(boolean isInv) {
+  gBz.fadeON = false;
+  gBz.fadeOFF = false;
+  gBz.wave = false;
+  gBz.invWave = false;
+
+  if (isInv) {
+    gBz.invWave = true;
+    gBz.n = 5000;
+
+  } else {
+    gBz.wave = true;
+    gBz.n = 0;
+  }
+  gBz.active = true;
+}
+
+/* Buzzer fade inverted pulse wave task executed in main loop every gBz.delayTime */
 void xBzWave() {
+  if (gBz.n < 5000) {
+      if (gBz.n < 2000) {
+        gBz.n += 100;
+      } else {
+        gBz.n += gBz.n/10;
+      }
+      if (gBz.active) {
+        tone(PIN_BZ, gBz.n);
+      } else {
+        noTone(PIN_BZ);
+      }
+    } else {
+      // Reset variables
+      gBz.wave = false;
+      gBz.active = false;
+      noTone(PIN_BZ);
+    }
+}
+
+/* Buzzer fade pulse wave task executed in main loop every gBz.delayTime */
+void xBzInvWave() {
   if(gBz.n > 100) {
     if (gBz.n < 1000) {
       gBz.n -= 50;
@@ -1074,25 +1132,21 @@ void xBzWave() {
     }
   } else {
     // Reset variables
-    gBz.wave = false;
+    gBz.invWave = false;
     gBz.active = false;
     noTone(PIN_BZ);
   }
 }
 
-void bzAgressive() {
-  //TODO
+// Beeping Buzzer motion
+void bzBlink(int f) {
+  if (g_bLEDs) {
+    tone(PIN_BZ, f);
+  } else {
+    noTone(PIN_BZ);
+  }
 }
 
-
-
-void bzHitPoint() {
-  //TODO
-}
-
-void bzChargePosutre() {
-  //TODO
-}
 
 /**************************** MPU6050 functions ******************************
 
@@ -1260,17 +1314,26 @@ void mpu6050read() {
   }
 #endif
 
-  if (gAccFx.bAgr) {
-    // Cut or impact
-    // ledAgressive();
+  // Data analysis to determine if an agresive cut or impact was performed
+  // TODO
 
-    //TODO
+  gAccFx.impDetect = false;
+  gAccFx.agrDetect = false;
+  gAccFx.bAgr = false;
 
+  if (gAccFx.agrDetect) {
+    // Trigger only one time
+    if (!gAccFx.bAgr) ledAgressive();
+    gAccFx.bAgr = true;
+
+  } else if (gAccFx.impDetect) {
+    // Impact in process...
+    if (gAccFx.nImact == 0) gAccFx.nImact = NUM_IMPACT;
 
   } else {
     // High Guard
     if ( gAcc.X > 0.9 && 0.1 > gAcc.Y > -0.1 && 0.1 > gAcc.Z > -0.1) {
-      startLedHighGuard();
+      if (!gAccFx.bHG) startLedHighGuard();
     } else {
       if (gAccFx.bHG) {
         gAccFx.bHG = false;
